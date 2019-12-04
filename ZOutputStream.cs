@@ -88,7 +88,7 @@ namespace zlib
 		}
 		
 		protected internal ZStream z = new ZStream();
-		protected internal int bufsize = 512;		
+		protected internal int bufsize = 512;
 		protected internal int flush_Renamed_Field;		
 		protected internal byte[] buf, buf1 = new byte[1];
 		protected internal bool compress;
