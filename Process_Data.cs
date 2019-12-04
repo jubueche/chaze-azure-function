@@ -18,7 +18,7 @@ namespace Chaze.Function
     public static class Process_Data
     {
         
-        public static bool VERBOSE = true;
+        public static bool VERBOSE = false;
         public static int getDuration(long bytes) {
             // recording contants
             float RATE_PRESSURE = 30.0f;
@@ -226,8 +226,10 @@ namespace Chaze.Function
             // get duration
             long bytes = myBlob.Length;
             int duration = getDuration(bytes);
-            var date = "" + day + "-" + month + "-" + year + "-" + minute + "-" + hour;
+            var date = day + "-" + month + "-" + year + "-" + minute + "-" + hour;
+            string complete_blob_name = device + "-" + num + "/" + name + "/" + date + ".txt";
             if(VERBOSE) log.LogInformation($"Date: {date}");
+            if(VERBOSE) log.LogInformation($"Complete blob name is {complete_blob_name}");
 
             decompress_strings(compressed_file_path, decompressed_file_path, log);
             if(VERBOSE) log.LogInformation($"Decompressed the input string");
@@ -235,8 +237,10 @@ namespace Chaze.Function
             // Need to get user name and fetch or create container for that user
             var user_id = name;
             var container_name = "trainings";
+            var compressed_container_name = "compressed";
             var connectionString = "DefaultEndpointsProtocol=https;AccountName=trainingsstorage;AccountKey=/Hy9Sk66v2srmQ+Y6u3lZPkrPHSXL0JOOGj48kVmhmPjyBihEbu2G/+zFu7/r7/6E0RVMwLJRm5aGJtl+UEttw==;EndpointSuffix=core.windows.net";
             BlobContainerClient container = new BlobContainerClient(connectionString, container_name);
+            BlobContainerClient container_compressed = new BlobContainerClient(connectionString, compressed_container_name);
             // Try to creat the container
             bool success = false;
             try {
@@ -327,6 +331,7 @@ namespace Chaze.Function
                 if(VERBOSE) log.LogInformation($"Uploaded to {file_name_for_upload}");
                 //! Catch blob already exists exception
                 BlobClient blob = container.GetBlobClient(file_name_for_upload);
+                bool successful_upload = true;
                 // Now, need to upload the decompressed file stream
                 try {
                     await container.UploadBlobAsync(file_name_for_upload, File.OpenRead(final_name));
@@ -338,18 +343,31 @@ namespace Chaze.Function
                     //! Need to upload to the same path, appended with a random number
                     Random rnd = new Random();
                     string new_name = old_name + rnd.Next(1,1000) + ".txt";
+                    complete_blob_name = new_name;
                     await container.UploadBlobAsync(new_name, File.OpenRead(final_name));
                 }
                 catch (RequestFailedException ex)
                 {
-                    Assert.Fail($"Unexpected error: {ex}");
+                    successful_upload = false;
+                    log.LogInformation($"Unsuccesful upload of blob {complete_blob_name}");
+                }
+                if(successful_upload)
+                {
+                    BlobClient blob_old = container_compressed.GetBlobClient(complete_blob_name);
+                    bool res = blob_old.DeleteIfExists();
+                    if(!res)
+                    {
+                        log.LogInformation($"Could not delete blob that was just uplaoded.");
+                    } else {
+                        if(VERBOSE) log.LogInformation($"Successfully deleted blob just uploaded.");
+                    }
                 }
             }
 
             //! Please uncomment for deployment.
             // Get the connection string from app settings and use it to create a connection.
             //var str = Environment.GetEnvironmentVariable("sqldb_connection");
-            /*var str = "Server=tcp:chazesqlserver.database.windows.net,1433;Initial Catalog=sql-database;Persist Security Info=False;User ID=chaze;Password=Data4Swimmers;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;";
+            var str = "Server=tcp:chazesqlserver.database.windows.net,1433;Initial Catalog=sql-database;Persist Security Info=False;User ID=chaze;Password=Data4Swimmers;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;";
             using (SqlConnection conn = new SqlConnection(str))
             {
                 conn.Open();
@@ -365,8 +383,7 @@ namespace Chaze.Function
                     if(VERBOSE) log.LogInformation($"{rows} rows were updated");
                 }
                 if(VERBOSE) log.LogInformation($"end");
-            }*/
-
+            }
         }
     }
 }
