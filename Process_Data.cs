@@ -244,6 +244,7 @@ namespace Chaze.Function
             // Try to creat the container
             bool success = false;
             try {
+                
                 await container.CreateAsync();
                 success = true;
             }
@@ -370,19 +371,26 @@ namespace Chaze.Function
             var str = "Server=tcp:chazesqlserver.database.windows.net,1433;Initial Catalog=sql-database;Persist Security Info=False;User ID=chaze;Password=Data4Swimmers;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;";
             using (SqlConnection conn = new SqlConnection(str))
             {
-                conn.Open();
-                var text = "INSERT INTO Training (userid, breast, freestyle, butterfly, back, other, distperlen, duration, laps) VALUES ('1', 'false', 'false', 'false', 'false', 'false', '-1', '" + duration + "', '-1')";
-
-                if(VERBOSE) log.LogInformation($"conn opened");
-
-                using (SqlCommand cmd = new SqlCommand(text, conn))
+                bool success_conn = true;
+                try {
+                    conn.Open();
+                } catch (Exception ex)
                 {
-                    if(VERBOSE) log.LogInformation($"inside using");
-                    // Execute the command and log the # rows affected.
-                    var rows = await cmd.ExecuteNonQueryAsync();
-                    if(VERBOSE) log.LogInformation($"{rows} rows were updated");
+                    success_conn = false;
                 }
-                if(VERBOSE) log.LogInformation($"end");
+                if(success_conn)
+                {
+                    var text = "INSERT INTO Training (userid, breast, freestyle, butterfly, back, other, distperlen, duration, laps) VALUES ('1', 'false', 'false', 'false', 'false', 'false', '-1', '" + duration + "', '-1')";
+                    if(VERBOSE) log.LogInformation($"conn opened");
+                    using (SqlCommand cmd = new SqlCommand(text, conn))
+                    {
+                        if(VERBOSE) log.LogInformation($"inside using");
+                        // Execute the command and log the # rows affected.
+                        var rows = await cmd.ExecuteNonQueryAsync();
+                        if(VERBOSE) log.LogInformation($"{rows} rows were updated");
+                    }
+                    if(VERBOSE) log.LogInformation($"end");
+                }
             }
         }
     }
