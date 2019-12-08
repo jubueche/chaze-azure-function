@@ -18,7 +18,7 @@ namespace Chaze.Function
     public static class Process_Data
     {
         
-        public static bool VERBOSE = false;
+        public static bool VERBOSE = true;
         public static int getDuration(long bytes) {
             // recording contants
             float RATE_PRESSURE = 30.0f;
