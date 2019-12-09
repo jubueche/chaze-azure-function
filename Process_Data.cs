@@ -19,6 +19,7 @@ namespace Chaze.Function
     {
         
         public static bool VERBOSE = true;
+        public static int num_samples_hr_raw = 500;
         public static int getDuration(long bytes) {
             // recording contants
             float RATE_PRESSURE = 30.0f;
@@ -66,7 +67,7 @@ namespace Chaze.Function
 			}
 		}
 
-        public enum READ_STATE : byte {PRESSURE=0, BACK_PRESSURE, HEART_RATE, BNO, ERROR};
+        public enum READ_STATE : byte {PRESSURE=0, BACK_PRESSURE, HEART_RATE, BNO, HEART_RATE_RAW, ERROR};
 
         public static READ_STATE get_state(byte value)
         {
@@ -79,6 +80,8 @@ namespace Chaze.Function
                     return READ_STATE.PRESSURE;
                 case 3: 
                     return READ_STATE.HEART_RATE;
+                case 6:
+                    return READ_STATE.HEART_RATE_RAW;
                 default:
                     return READ_STATE.ERROR;
             }
@@ -89,10 +92,13 @@ namespace Chaze.Function
             if(curr_state == READ_STATE.BNO)
             {
                 return 32;
+            } else if(curr_state == READ_STATE.HEART_RATE_RAW)
+            {
+                return 4+4*num_samples_hr_raw;
             } else if(curr_state != READ_STATE.ERROR){
                 return 8;
             } else {
-                return 8; //TODO: Maybe return 0 so we continue with the next byte to "maybe" recover? Or all hope's lost?
+                return 0; // Return so we look at the next byte. This is for filled up buffers. 
             }
         }
 
@@ -113,6 +119,11 @@ namespace Chaze.Function
         public static Int32 get_heart_rate(byte[] curr_byte)
         {
             return 16777216*curr_byte[0] + 65536*curr_byte[1] + 256*curr_byte[2] + curr_byte[3];
+        }
+
+        public static unsafe Int32 get_heart_rate_raw(byte[] curr_byte)
+        {
+            return  16777216*curr_byte[0] + 65536*curr_byte[1] + 256*curr_byte[2] + curr_byte[3];
         }
 
         public static void convert_and_write(READ_STATE curr_state, byte[] curr_buf, StreamWriter final_fs, ILogger log)
@@ -148,6 +159,22 @@ namespace Chaze.Function
                     float tmp_val = get_float_val(curr_float_byte);
                     if(VERBOSE) log.LogInformation($"Float is {tmp_val}");
                     to_write += " " + indicators[i] + tmp_val;
+                }
+            } else if(curr_state == READ_STATE.HEART_RATE_RAW)
+            {
+                if(VERBOSE) log.LogInformation($"Have Heart Rate Raw");
+                to_write += " Heart Rate Raw:";
+                for(int i=0;i<num_samples_hr_raw;i++)
+                {
+                    byte[] curr_int_byte = new byte[4];
+                    for(int j=0;j<4;j++)
+                    {
+                        curr_int_byte[j] = curr_buf[4+i*4+j]; //Starting at 4 because of the time
+                    }
+                    if(VERBOSE) log.LogInformation($"Heart rate raw as byte array is {string.Join(",", curr_int_byte)}");
+                    int tmp_val = get_heart_rate_raw(curr_int_byte);
+                    if(VERBOSE) log.LogInformation($"Int is {tmp_val}");
+                    to_write += " " + tmp_val;
                 }
             } else {
                 string indicator = "";
@@ -267,13 +294,14 @@ namespace Chaze.Function
                 using (FileStream fs = File.OpenRead(decompressed_file_path))
                 using (StreamWriter final_fs = new StreamWriter(final_name))
                 {
-                    int max_to_read = 1024;
+                    int max_to_read = 8192;
                     byte[] b = new byte[max_to_read];
                     int numBytesToRead = (int)fs.Length;
                     READ_STATE curr_state = READ_STATE.ERROR;
                     int numBytesRead = 0;
                     int left_to_read = 0; // Needs to be used if we collect 1024 values and there is an overlap in the next buffer
-                    byte[] curr_buf = new byte[33]; // The maximum number of bytes is 33 from the BNO
+                    // byte[] curr_buf = new byte[33]; // The maximum number of bytes is 33 from the BNO //! For single HR reading
+                    byte[] curr_buf = new byte[5+4*num_samples_hr_raw];
                     int curr_buf_offset = 0;
                     while (numBytesToRead > 0)
                     {
@@ -302,7 +330,7 @@ namespace Chaze.Function
                                 curr_buf_offset = 0;
                                 i++;
                             } else {
-                                if(i + left_to_read < n) // It fits and we can read the next "left_to_read" values
+                                if(i + left_to_read <= n) // It fits and we can read the next "left_to_read" values
                                 {
                                     if(VERBOSE) log.LogInformation($"Can fit everything.");
                                     while(left_to_read > 0)
@@ -335,7 +363,10 @@ namespace Chaze.Function
                 bool successful_upload = true;
                 // Now, need to upload the decompressed file stream
                 try {
-                    await container.UploadBlobAsync(file_name_for_upload, File.OpenRead(final_name));
+                    using (FileStream uploadFileStream = File.OpenRead(final_name))
+                    {
+                        await blob.UploadAsync(uploadFileStream);
+                    }
                 }
                 catch(RequestFailedException ex)
                 when (ex.ErrorCode == BlobErrorCode.BlobAlreadyExists)
