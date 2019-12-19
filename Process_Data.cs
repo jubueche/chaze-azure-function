@@ -2,6 +2,9 @@ using System;
 using System.IO;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Host;
+using Microsoft.Azure.EventGrid;
+using Microsoft.Azure.WebJobs.Extensions.EventGrid;
+using Microsoft.Azure.EventGrid.Models;
 using Microsoft.Extensions.Logging;
 using System.Data.SqlClient;
 using Azure;
@@ -19,6 +22,7 @@ namespace Chaze.Function
     {
         
         public static bool VERBOSE = true;
+        public static bool use_TXT = false;
         public static int num_samples_hr_raw = 500;
         public static int getDuration(long bytes) {
             // recording contants
@@ -211,6 +215,7 @@ namespace Chaze.Function
             final_fs.WriteLine(to_write);
         }
 
+
         [FunctionName("Process_Data")]
         async public static void Run([BlobTrigger("compressed/{device}-{num}/{name}/{day}-{month}-{year}-{minute}-{hour}.txt", Connection = "AzureWebJobsStorage")]Stream myBlob, string device,
                 string num, string name, string day, string month, string year, string minute, string hour, ILogger log)
@@ -224,30 +229,40 @@ namespace Chaze.Function
             string decompressed_file_path = "decompressed.dat";
 
             // Write the myBlob stream into memory at location compressed_file_path
-            using (var fs = new FileStream(compressed_file_path, FileMode.Create))
-            using (var sr = new StreamReader(myBlob))
+            if(use_TXT)
             {
-                /*await sr.CopyToAsync(fileStream);
-                fileStream.Close();
-                sr.Close();*/
-                string line;
-                while (!sr.EndOfStream)
+                using (var fs = new FileStream(compressed_file_path, FileMode.Create))
+                using (var sr = new StreamReader(myBlob))
                 {
-                    // Each line contains uint8_t seperated by spaces. Convert them to bytes
-                    line = sr.ReadLine();
-                    string[] byte_values = line.Split(' ');
-                    if(VERBOSE) log.LogInformation($"string array is{string.Join(",",byte_values)}");
-                    foreach (var b in byte_values)
+                    /*await sr.CopyToAsync(fileStream);
+                    fileStream.Close();
+                    sr.Close();*/
+                    string line;
+                    if(VERBOSE) log.LogInformation($"Uploaded (compressed) bytes:");
+                    while (!sr.EndOfStream)
                     {
-                        byte byteValue;
-                        bool successful = Byte.TryParse(b, out byteValue);
-                        if(successful)
+                        // Each line contains uint8_t seperated by spaces. Convert them to bytes
+                        line = sr.ReadLine();
+                        string[] byte_values = line.Split(' ');
+                        if(VERBOSE) log.LogInformation($"{string.Join(",",byte_values)}");
+                        foreach (var b in byte_values)
                         {
-                            fs.WriteByte(byteValue);
+                            byte byteValue;
+                            bool successful = Byte.TryParse(b, out byteValue);
+                            if(successful)
+                            {
+                                fs.WriteByte(byteValue);
+                            }
                         }
                     }
+                    fs.Seek(0, SeekOrigin.Begin);
                 }
-                fs.Seek(0, SeekOrigin.Begin);
+            } else { // We received a pure byte stream
+                using (var fs = new FileStream(compressed_file_path, FileMode.Create))
+                {
+                    await myBlob.CopyToAsync(fs);
+                    fs.Seek(0, SeekOrigin.Begin);
+                }
             }
 
             // get duration

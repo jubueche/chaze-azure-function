@@ -142,7 +142,14 @@ namespace zlib
 				else
 					err = z.inflate(flush_Renamed_Field);
 				if (err != zlibConst.Z_OK && err != zlibConst.Z_STREAM_END)
+				{
 					throw new ZStreamException((compress?"de":"in") + "flating: " + z.msg);
+				}
+				//! Added by julianb
+				if(err == zlibConst.Z_STREAM_END)
+				{
+					break;
+				}
 				out_Renamed.Write(buf, 0, bufsize - z.avail_out);
 			}
 			while (z.avail_in > 0 || z.avail_out == 0);
@@ -165,7 +172,14 @@ namespace zlib
 					err = z.inflate(zlibConst.Z_FINISH);
 				}
 				if (err != zlibConst.Z_STREAM_END && err != zlibConst.Z_OK)
+				{
 					throw new ZStreamException((compress?"de":"in") + "flating: " + z.msg);
+				}
+				//! Added by julianb
+				if (err == zlibConst.Z_STREAM_END)
+				{
+					break;
+				}
 				if (bufsize - z.avail_out > 0)
 				{
 					out_Renamed.Write(buf, 0, bufsize - z.avail_out);
