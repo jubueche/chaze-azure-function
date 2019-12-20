@@ -24,6 +24,9 @@ namespace Chaze.Function
         public static bool VERBOSE = true;
         public static bool use_TXT = false;
         public static int num_samples_hr_raw = 500;
+        public static int CHUNK_SIZE = 8192;
+        public static int first_indicator_byte = 24;
+        public static int second_indicator_byte = 149;
         public static int getDuration(long bytes) {
             // recording contants
             float RATE_PRESSURE = 30.0f;
@@ -42,18 +45,7 @@ namespace Chaze.Function
 
         }
 
-        public static void CopyStream(System.IO.Stream input, System.IO.Stream output)
-		{
-			byte[] buffer = new byte[2000];
-			int len;
-			while ((len = input.Read(buffer, 0, 2000)) > 0)
-			{
-				output.Write(buffer, 0, len);
-			}
-			output.Flush();
-		}
-
-        public static void decompress_strings(string compressed_file_path, string decompressed_file_path, ILogger log)
+        public static void decompress(string compressed_file_path, string decompressed_file_path, ILogger log)
 		{
 			System.IO.FileStream decompressedFileStream = new System.IO.FileStream(decompressed_file_path, System.IO.FileMode.Create);
             // Create a outZstream object
@@ -61,15 +53,16 @@ namespace Chaze.Function
 			System.IO.FileStream compressedFileStream = new System.IO.FileStream(compressed_file_path, System.IO.FileMode.Open);		
 			try
 			{
-				CopyStream(compressedFileStream, outZStream);
+				// CopyStream(compressedFileStream, outZStream);
+                outZStream.decompressFileStream(compressedFileStream, log);
 			}
 			finally
 			{
-				outZStream.Close();
 			    decompressedFileStream.Close();
 				compressedFileStream.Close();
 			}
 		}
+
 
         public enum READ_STATE : byte {PRESSURE=0, BACK_PRESSURE, HEART_RATE, BNO, HEART_RATE_RAW, ERROR};
 
@@ -234,9 +227,6 @@ namespace Chaze.Function
                 using (var fs = new FileStream(compressed_file_path, FileMode.Create))
                 using (var sr = new StreamReader(myBlob))
                 {
-                    /*await sr.CopyToAsync(fileStream);
-                    fileStream.Close();
-                    sr.Close();*/
                     string line;
                     if(VERBOSE) log.LogInformation($"Uploaded (compressed) bytes:");
                     while (!sr.EndOfStream)
@@ -273,7 +263,7 @@ namespace Chaze.Function
             if(VERBOSE) log.LogInformation($"Date: {date}");
             if(VERBOSE) log.LogInformation($"Complete blob name is {complete_blob_name}");
 
-            decompress_strings(compressed_file_path, decompressed_file_path, log);
+            decompress(compressed_file_path, decompressed_file_path, log);
             if(VERBOSE) log.LogInformation($"Decompressed the input string");
 
             // Need to get user name and fetch or create container for that user
@@ -283,7 +273,24 @@ namespace Chaze.Function
             var connectionString = "DefaultEndpointsProtocol=https;AccountName=trainingsstorage;AccountKey=/Hy9Sk66v2srmQ+Y6u3lZPkrPHSXL0JOOGj48kVmhmPjyBihEbu2G/+zFu7/r7/6E0RVMwLJRm5aGJtl+UEttw==;EndpointSuffix=core.windows.net";
             BlobContainerClient container = new BlobContainerClient(connectionString, container_name);
             BlobContainerClient container_compressed = new BlobContainerClient(connectionString, compressed_container_name);
-            // Try to creat the container
+            
+            if(VERBOSE)
+            {
+                using (System.IO.FileStream fs_debug = new System.IO.FileStream(decompressed_file_path, System.IO.FileMode.Open))
+                {
+                    fs_debug.Seek(0, SeekOrigin.Begin);
+                    int next;
+                    do {
+                        next = fs_debug.ReadByte();
+                        log.LogInformation($"{(byte) next}");
+                    } while(next != -1);
+
+                    log.LogInformation($"Size of the stream is {fs_debug.Length}");
+                }
+            }
+            
+            
+            // Try to create the container
             bool success = false;
             try {
                 
@@ -309,8 +316,7 @@ namespace Chaze.Function
                 using (FileStream fs = File.OpenRead(decompressed_file_path))
                 using (StreamWriter final_fs = new StreamWriter(final_name))
                 {
-                    int max_to_read = 8192;
-                    byte[] b = new byte[max_to_read];
+                    byte[] b = new byte[CHUNK_SIZE];
                     int numBytesToRead = (int)fs.Length;
                     READ_STATE curr_state = READ_STATE.ERROR;
                     int numBytesRead = 0;
@@ -320,7 +326,7 @@ namespace Chaze.Function
                     int curr_buf_offset = 0;
                     while (numBytesToRead > 0)
                     {
-                        int n = fs.Read(b, 0, max_to_read);
+                        int n = fs.Read(b, 0, CHUNK_SIZE);
                         if (n == 0){
                             if(VERBOSE) log.LogInformation($"Read zero bytes. Break");
                             break;

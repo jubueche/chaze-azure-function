@@ -99,6 +99,11 @@ namespace ComponentAce.Compression.Libs.zlib
 			return istate.inflateInit(this, w);
 		}
 		
+		public void inflateReset()
+		{
+			istate.inflateReset(this);
+		}
+
 		public int inflate(int f)
 		{
 			if (istate == null)
