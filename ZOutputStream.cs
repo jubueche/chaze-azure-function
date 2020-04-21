@@ -157,13 +157,12 @@ namespace zlib
 		{
 			// Received a memory stream and writes the decompressed chunks into out_Renamed using
 			// out_Renamed.Write(decompressed_buf, offset, length)
-			
 			// I) Read 8192 bytes or len. If len -1, we are done
 			// II) Decompress and write the chunk to the out stream
 			// III) Now we have total_in number of bytes used from compressedStream.
 			// IV) Move MemoryStream pointer to total_in
 			// V) Reset the inflation stream
-			// V) Repeat from I)
+			// VI) Repeat from I)
 			int len;
 			byte[] buffer = new byte[8192];
 			byte[] b = new byte[buffer.Length];
@@ -209,6 +208,7 @@ namespace zlib
 			}
 			z.inflateEnd();
 			end();
+			
 			out_Renamed.Close();
 		}
 		

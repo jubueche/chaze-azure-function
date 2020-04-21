@@ -404,17 +404,17 @@ namespace Chaze.Function
                     successful_upload = false;
                     log.LogInformation($"Unsuccesful upload of blob {complete_blob_name}");
                 }
-                if(successful_upload)
-                {
-                    BlobClient blob_old = container_compressed.GetBlobClient(complete_blob_name);
-                    bool res = blob_old.DeleteIfExists();
-                    if(!res)
-                    {
-                        log.LogInformation($"Could not delete blob that was just uplaoded.");
-                    } else {
-                        if(VERBOSE) log.LogInformation($"Successfully deleted blob just uploaded.");
-                    }
-                }
+                // if(successful_upload)
+                // {
+                //     BlobClient blob_old = container_compressed.GetBlobClient(complete_blob_name);
+                //     bool res = blob_old.DeleteIfExists();
+                //     if(!res)
+                //     {
+                //         log.LogInformation($"Could not delete blob that was just uplaoded.");
+                //     } else {
+                //         if(VERBOSE) log.LogInformation($"Successfully deleted blob just uploaded.");
+                //     }
+                // }
             }
 
             //! Please uncomment for deployment.
