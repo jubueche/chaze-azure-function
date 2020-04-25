@@ -27,3 +27,6 @@ into the ```trainings``` container. After a successful upload, the old blob in t
 
 - **int max_to_read** : Currently set to 1024. This is the buffer size used when reading a chunk from the decompressed file. Can be increased for performance, but consumes
 more memory.
+
+## TODOs before deploy
+- [ ] In ```host.json``` change LogLevel from Debug (to Critical or maybe Information)

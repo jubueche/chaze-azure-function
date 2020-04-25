@@ -66,7 +66,7 @@ namespace Chaze.Function
 		}
 
 
-        public enum READ_STATE : byte {PRESSURE=0, BACK_PRESSURE, HEART_RATE, BNO, HEART_RATE_RAW, ERROR};
+        public enum READ_STATE : byte {PRESSURE=0, BACK_PRESSURE, HEART_RATE, BNO, HEART_RATE_RAW, ERROR, EOF=102};
 
         public static READ_STATE get_state(byte value)
         {
@@ -104,8 +104,13 @@ namespace Chaze.Function
         }
 
 
-        public static ulong get_long(byte[] bytes, int ind) {
-            ulong recon = Convert.ToUInt64(16777216*bytes[ind] + 65536*bytes[ind+1] + 256*bytes[ind+2] + bytes[ind+3]);
+        public static ulong get_long(byte[] bytes, int ind, ILogger log) {
+            ulong recon = 0;
+            try {
+                recon = Convert.ToUInt64(16777216*bytes[ind] + 65536*bytes[ind+1] + 256*bytes[ind+2] + bytes[ind+3]);
+            } catch(Exception ex) {
+                log.LogError($"Couldn't convert to long: {bytes[ind]} {bytes[ind+1]} {bytes[ind+2]} {bytes[ind]+3}. {ex}");
+            }
             return recon;
         }
 
@@ -131,9 +136,9 @@ namespace Chaze.Function
 
             // Debug: What data loged on Debug?
             bool log_time       = true;
-            bool log_press      = false;
-            bool log_back_press = false;
-            bool log_bno        = false;
+            bool log_press      = true;
+            bool log_back_press = true;
+            bool log_bno        = true;
             bool log_heart_raw  = false;
             bool log_heart      = false;
 
@@ -142,8 +147,7 @@ namespace Chaze.Function
             string to_write = "";
             int ind = 0;
 
-            // get time (long, 4 bytes)
-            ulong time = get_long(data, ind);
+            ulong time = get_long(data, ind, log);
 
             if(log_time) {
                 string byte_string = "";
@@ -316,6 +320,7 @@ namespace Chaze.Function
                         break;
                     }
 
+                    log.LogDebug($"State byte: {state_byte[0]}");
                     READ_STATE curr_state = get_state(state_byte[0]);
                     int state_datasize = get_state_datasize(curr_state);
                     log.LogDebug($"State {curr_state}: expecting {state_datasize} bytes");
