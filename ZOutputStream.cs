@@ -92,7 +92,6 @@ namespace zlib
 		protected internal int bufsize = 512;
 		protected internal int flush_Renamed_Field;		
 		protected internal byte[] buf, buf1 = new byte[1];
-		protected internal bool compress;
 		
 		private System.IO.Stream out_Renamed;
 		
@@ -101,17 +100,8 @@ namespace zlib
 			InitBlock();
 			this.out_Renamed = out_Renamed;
 			z.inflateInit();
-			compress = false;
 		}
-		
-		public ZOutputStream(System.IO.Stream out_Renamed, int level):base()
-		{
-			InitBlock();
-			this.out_Renamed = out_Renamed;
-			z.deflateInit(level);
-			compress = true;
-		}
-		
+
 		public  void  WriteByte(int b)
 		{
 			buf1[0] = (byte) b;
@@ -139,13 +129,11 @@ namespace zlib
 				z.next_out = buf;
 				z.next_out_index = 0;
 				z.avail_out = bufsize;
-				if (compress)
-					err = z.deflate(flush_Renamed_Field);
-				else
-					err = z.inflate(flush_Renamed_Field);
+				err = z.inflate(flush_Renamed_Field);
+
 				if (err != zlibConst.Z_OK && err != zlibConst.Z_STREAM_END)
 				{
-					throw new ZStreamException((compress?"de":"in") + "flating: " + z.msg);
+					throw new ZStreamException("Exception decompressing: " + z.msg);
 				}
 				out_Renamed.Write(buf, 0, bufsize - z.avail_out);
 				total_out += bufsize-z.avail_out;
@@ -153,71 +141,19 @@ namespace zlib
 			while (z.avail_out == 0);
 		}
 
-		public void decompressFileStream(System.IO.FileStream compressedMemoryStream, ILogger log, String name)
+		public void decompressStream(System.IO.Stream compressedStream, ILogger log)
 		{
-			// Received a memory stream and writes the decompressed chunks into out_Renamed using
-			// out_Renamed.Write(decompressed_buf, offset, length)
-			// I) Read 8192 bytes or len. If len -1, we are done
-			// II) Decompress and write the chunk to the out stream
-			// III) Now we have total_in number of bytes used from compressedStream.
-			// IV) Move MemoryStream pointer to total_in
-			// V) Reset the inflation stream
-			// VI) Repeat from I)
+			// Decompress stream:
+			// Read bufsize bytes from stream and pass to Write for decompression
 			int len;
-			byte[] buffer = new byte[8192];
-			byte[] b = new byte[buffer.Length];
-			int err;
-			long total_out = 0;
-			long total_in = 0;
-			int while_big = 0;
-			while((len = compressedMemoryStream.Read(buffer, 0, 8192)) > 0) {
-				// We have written len many bytes into buffer
-				System.Array.Copy(buffer,b,len);
-				z.next_in = b;
-				z.next_in_index = 0;
-				z.avail_in = len;
+			byte[] buffer = new byte[bufsize];
 
-				int while_small = 0;
-				do 
-				{
-					z.next_out = buf;
-					z.next_out_index = 0;
-					z.avail_out = bufsize;
-					if (compress)
-						err = z.deflate(flush_Renamed_Field);
-					else
-						err = z.inflate(flush_Renamed_Field);
-					if (err != zlibConst.Z_OK && err != zlibConst.Z_STREAM_END)
-					{
-						throw new ZStreamException((compress?"de":"in") + "flating " + name + ": " + z.msg);
-					}
-					// TODO: Passierts hier?
-					out_Renamed.Write(buf, 0, bufsize - z.avail_out);
-					log.LogInformation($"Wrote {bufsize-z.avail_out} to the decompressed file");
-					// z.total_in is the total number of consumed bytes for decompression 
-					log.LogInformation($"z.total_in is {z.total_in}");
-					log.LogInformation($"z.total_out is {z.total_out}");
-
-					while_small++;
-				}
-				while (z.avail_out == 0 && err != zlibConst.Z_STREAM_END); // End if the stream is ended
-				// Decompression of this chunk is done. Move back pointer by len-z.total_in
-				total_in += z.total_in;
-				total_out += z.total_out;				
-				log.LogInformation($"total_in is {total_in}");
-				long curr_position = compressedMemoryStream.Position;
-				log.LogInformation($"Current read position after compression {curr_position}");
-				compressedMemoryStream.Position = total_in;
-				log.LogInformation($"{b[0]} {b[1]} {b[z.total_in]} {b[z.total_in+1]}");
-				log.LogInformation($"After resetting it is {compressedMemoryStream.Position}");
-				z.inflateReset();
-
-				while_big++;
+			while((len = compressedStream.Read(buffer, 0, bufsize)) > 0) {
+				this.Write(buffer, 0, len);
 			}
+
 			z.inflateEnd();
 			end();
-			
-			out_Renamed.Close();
 		}
 		
 		public virtual void  finish()
@@ -228,17 +164,11 @@ namespace zlib
 				z.next_out = buf;
 				z.next_out_index = 0;
 				z.avail_out = bufsize;
-				if (compress)
-				{
-					err = z.deflate(zlibConst.Z_FINISH);
-				}
-				else
-				{
-					err = z.inflate(zlibConst.Z_FINISH);
-				}
+				err = z.inflate(zlibConst.Z_FINISH);
+
 				if (err != zlibConst.Z_STREAM_END && err != zlibConst.Z_OK)
 				{
-					throw new ZStreamException((compress?"de":"in") + "flating: " + z.msg);
+					throw new ZStreamException("inflating: " + z.msg);
 				}
 				if (bufsize - z.avail_out > 0)
 				{
@@ -262,14 +192,7 @@ namespace zlib
 
 		public virtual void  end()
 		{
-			if (compress)
-			{
-				z.deflateEnd();
-			}
-			else
-			{
-				z.inflateEnd();
-			}
+			z.inflateEnd();
 			z.free();
 			z = null;
 		}
