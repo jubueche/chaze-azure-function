@@ -20,9 +20,6 @@ namespace Chaze.Function
 {
     public static class Process_Data
     {
-        
-        public static bool VERBOSE = true;
-        public static bool use_TXT = false;
         public static int num_samples_hr_raw = 500;
         public static int CHUNK_SIZE = 8192;
         public static int first_indicator_byte = 24;
@@ -248,8 +245,11 @@ namespace Chaze.Function
 
         [FunctionName("Process_Data")]
         async public static void Run([BlobTrigger("compressed/{device}-{num}/{name}/{day}-{month}-{year}-{minute}-{hour}.txt", Connection = "AzureWebJobsStorage")]Stream myBlob, string device,
-                string num, string name, string day, string month, string year, string minute, string hour, ILogger log)
+                string num, string name, string day, string month, string year, string minute, string hour, ExecutionContext exCtx ,ILogger log)
         {
+
+            log.LogInformation($"Instance ID is {exCtx.InvocationId}");
+            // throw new System.ArgumentException("Parameter cannot be null", "original");
 
             // get training information
             long bytes = myBlob.Length;
@@ -259,53 +259,26 @@ namespace Chaze.Function
 
             log.LogInformation($"Triggered by Name:{complete_blob_name} \n Size: {myBlob.Length} Bytes");
 
-
             // Write myBlob to file TODO: Direkt myBlob stream
-            string compressed_file_path = "compressed.dat";
-            string decompressed_file_path = "decompressed.dat";
+            string compressed_file_path = $"compressed{exCtx.InvocationId}.dat";
+            string decompressed_file_path = $"decompressed{exCtx.InvocationId}.dat";
 
-            if(use_TXT)
+             // We received a pure byte stream
+            using (var fs = new FileStream(compressed_file_path, FileMode.Create))
             {
-                using (var fs = new FileStream(compressed_file_path, FileMode.Create))
-                using (var sr = new StreamReader(myBlob))
-                {
-                    string line;
-                    log.LogDebug($"Uploaded (compressed) bytes:");
-                    while (!sr.EndOfStream)
-                    {
-                        // Each line contains uint8_t seperated by spaces. Convert them to bytes
-                        line = sr.ReadLine();
-                        string[] byte_values = line.Split(' ');
-                        log.LogDebug($"{string.Join(",",byte_values)}");
-                        foreach (var b in byte_values)
-                        {
-                            byte byteValue;
-                            if(Byte.TryParse(b, out byteValue)) {
-                                fs.WriteByte(byteValue);
-                            }
-                        }
-                    }
-                    fs.Seek(0, SeekOrigin.Begin);
-                }
-            } else { // We received a pure byte stream
-                using (var fs = new FileStream(compressed_file_path, FileMode.Create))
-                {
-                    await myBlob.CopyToAsync(fs);
-                    fs.Seek(0, SeekOrigin.Begin);
-                }
+                await myBlob.CopyToAsync(fs);
+                fs.Seek(0, SeekOrigin.Begin);
             }
-
 
             // decompress
             decompress(compressed_file_path, decompressed_file_path, log);
             log.LogInformation($"Decompressed the input string");
 
-
-            // Parse bytes of decompressed file into desired format. Write to formated_data
-            string formated_data = "formated.txt";
+            // Parse bytes of decompressed file into desired format. Write to formatted_data
+            string formatted_data = "formatted.txt";
 
             using (FileStream fs = File.OpenRead(decompressed_file_path))
-            using (StreamWriter format_fs = new StreamWriter(formated_data))
+            using (StreamWriter format_fs = new StreamWriter(formatted_data))
             {        
                 int to_parse = (int)fs.Length;
 
@@ -348,13 +321,13 @@ namespace Chaze.Function
             }
 
 
-            // upload formated training to trainings container, user's dir
+            // upload formatted training to trainings container, user's dir
             string file_name_for_upload = "" + name + "/" + date + ".txt";
 
             BlobClient blob = container.GetBlobClient(file_name_for_upload);
             bool successful_upload = true;
             try {
-                await blob.UploadAsync(File.OpenRead(formated_data));
+                await blob.UploadAsync(File.OpenRead(formatted_data));
             }
             catch(RequestFailedException ex)
             when (ex.ErrorCode == BlobErrorCode.BlobAlreadyExists)
@@ -368,7 +341,7 @@ namespace Chaze.Function
                     log.LogCritical($"Blob already exists. Trying upload as {file_name_for_upload}");
 
                     try{
-                        await blob.UploadAsync(File.OpenRead(formated_data));
+                        await blob.UploadAsync(File.OpenRead(formatted_data));
                         unique_name = true;
                     }
                     catch(RequestFailedException ex2)
