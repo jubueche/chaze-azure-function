@@ -6,6 +6,7 @@ using Microsoft.Azure.EventGrid;
 using Microsoft.Azure.WebJobs.Extensions.EventGrid;
 using Microsoft.Azure.EventGrid.Models;
 using Microsoft.Extensions.Logging;
+using Microsoft.Azure.Storage.Blob;
 using System.Data.SqlClient;
 using Azure;
 using Azure.Storage.Blobs;
@@ -20,6 +21,9 @@ namespace Chaze.Function
 {
     public static class Process_Data
     {
+        
+        public static bool VERBOSE = true;
+        public static bool use_TXT = false;
         public static int num_samples_hr_raw = 500;
         public static int CHUNK_SIZE = 8192;
         public static int first_indicator_byte = 24;
@@ -42,24 +46,21 @@ namespace Chaze.Function
 
         }
 
-        public static void decompress(string compressed_file_path, string decompressed_file_path, ILogger log)
+        public static Stream decompress(Stream compressedStream, ILogger log)
 		{
-            log.LogInformation($"compressing " + decompressed_file_path);   
+			MemoryStream decompressedStream = new MemoryStream();
+			zlib.ZOutputStream outZStream = new zlib.ZOutputStream(decompressedStream);
 
-			System.IO.FileStream decompressedFileStream = new System.IO.FileStream(decompressed_file_path, System.IO.FileMode.Create);
-            // Create a outZstream object
-			zlib.ZOutputStream outZStream = new zlib.ZOutputStream(decompressedFileStream);
-			System.IO.FileStream compressedFileStream = new System.IO.FileStream(compressed_file_path, System.IO.FileMode.Open);		
 			try
 			{
-				// CopyStream(compressedFileStream, outZStream);
-                outZStream.decompressFileStream(compressedFileStream, log, compressed_file_path);
+                outZStream.decompressStream(compressedStream, log);
 			}
 			finally
 			{
-			    decompressedFileStream.Close();
-				compressedFileStream.Close();
+                decompressedStream.Seek(0, SeekOrigin.Begin);
 			}
+
+            return decompressedStream;
 		}
 
 
@@ -78,6 +79,8 @@ namespace Chaze.Function
                     return READ_STATE.HEART_RATE;
                 case 6:
                     return READ_STATE.HEART_RATE_RAW;
+                case 102:
+                    return READ_STATE.EOF;
                 default:
                     return READ_STATE.ERROR;
             }
@@ -132,10 +135,10 @@ namespace Chaze.Function
             }
 
             // Debug: What data loged on Debug?
-            bool log_time       = true;
-            bool log_press      = true;
-            bool log_back_press = true;
-            bool log_bno        = true;
+            bool log_time       = false;
+            bool log_press      = false;
+            bool log_back_press = false;
+            bool log_bno        = false;
             bool log_heart_raw  = false;
             bool log_heart      = false;
 
@@ -245,11 +248,8 @@ namespace Chaze.Function
 
         [FunctionName("Process_Data")]
         async public static void Run([BlobTrigger("compressed/{device}-{num}/{name}/{day}-{month}-{year}-{minute}-{hour}.txt", Connection = "AzureWebJobsStorage")]Stream myBlob, string device,
-                string num, string name, string day, string month, string year, string minute, string hour, ExecutionContext exCtx ,ILogger log)
+                string num, string name, string day, string month, string year, string minute, string hour, ILogger log)
         {
-
-            log.LogInformation($"Instance ID is {exCtx.InvocationId}");
-            // throw new System.ArgumentException("Parameter cannot be null", "original");
 
             // get training information
             long bytes = myBlob.Length;
@@ -259,49 +259,36 @@ namespace Chaze.Function
 
             log.LogInformation($"Triggered by Name:{complete_blob_name} \n Size: {myBlob.Length} Bytes");
 
-            // Write myBlob to file TODO: Direkt myBlob stream
-            string compressed_file_path = $"compressed{exCtx.InvocationId}.dat";
-            string decompressed_file_path = $"decompressed{exCtx.InvocationId}.dat";
-
-             // We received a pure byte stream
-            using (var fs = new FileStream(compressed_file_path, FileMode.Create))
-            {
-                await myBlob.CopyToAsync(fs);
-                fs.Seek(0, SeekOrigin.Begin);
-            }
 
             // decompress
-            decompress(compressed_file_path, decompressed_file_path, log);
+            System.IO.Stream decompressedStream = decompress(myBlob, log);
             log.LogInformation($"Decompressed the input string");
 
-            // Parse bytes of decompressed file into desired format. Write to formatted_data
-            string formatted_data = "formatted.txt";
 
-            using (FileStream fs = File.OpenRead(decompressed_file_path))
-            using (StreamWriter format_fs = new StreamWriter(formatted_data))
+            // Parse bytes of decompressed file into desired format
+            //using (FileStream fs = File.OpenRead(decompressed_file_path))
+            string formatted_path = "formatted.txt";
+            using (StreamWriter formatWriter = new StreamWriter(formatted_path))
             {        
-                int to_parse = (int)fs.Length;
+                int to_parse = (int) decompressedStream.Length;
 
                 while (to_parse > 0)
                 {
                     // get state
                     byte[] state_byte = new byte[1];
-                    int n = fs.Read(state_byte, 0, 1); to_parse--;
+                    int n = decompressedStream.Read(state_byte, 0, 1); to_parse--;
 
-                    if (n == 0){
-                        log.LogCritical($"Read zero bytes. Think this is impossible");
-                        break;
-                    }
-
-                    log.LogDebug($"State byte: {state_byte[0]}");
                     READ_STATE curr_state = get_state(state_byte[0]);
+                    if (curr_state == READ_STATE.EOF) break;
+                    if (curr_state == READ_STATE.ERROR) log.LogError($"State byte: {state_byte[0]}");
+
                     int state_datasize = get_state_datasize(curr_state);
                     log.LogDebug($"State {curr_state}: expecting {state_datasize} bytes");
 
                     // get data and write to file
                     byte[] data = new byte[state_datasize];
-                    fs.Read(data, 0, state_datasize); to_parse -= state_datasize;
-                    convert_and_write(curr_state, data, format_fs, log);
+                    decompressedStream.Read(data, 0, state_datasize); to_parse -= state_datasize;
+                    convert_and_write(curr_state, data, formatWriter, log);
                 }
             }
 
@@ -321,55 +308,48 @@ namespace Chaze.Function
             }
 
 
-            // upload formatted training to trainings container, user's dir
             string file_name_for_upload = "" + name + "/" + date + ".txt";
-
             BlobClient blob = container.GetBlobClient(file_name_for_upload);
             bool successful_upload = true;
-            try {
-                await blob.UploadAsync(File.OpenRead(formatted_data));
-            }
-            catch(RequestFailedException ex)
-            when (ex.ErrorCode == BlobErrorCode.BlobAlreadyExists)
-            {
-                // while there exists a blob with the same name, append '_1'
-                bool unique_name = false;
-                while(!unique_name) {
+
+            // append '_1' as long as there's no unique name
+            bool unique_name = false;
+            while(!unique_name) {
+                log.LogInformation($"Trying upload as {file_name_for_upload}");
+                try {
+                    await blob.UploadAsync(File.OpenRead(formatted_path));
+                    unique_name = true;
+                }
+                catch(RequestFailedException ex)
+                when (ex.ErrorCode == BlobErrorCode.BlobAlreadyExists)
+                {
+                    unique_name = false;
                     int str_len = file_name_for_upload.Length;
                     file_name_for_upload = file_name_for_upload.Substring(0, str_len-4) + "_1.txt";
                     blob = container.GetBlobClient(file_name_for_upload);
-                    log.LogCritical($"Blob already exists. Trying upload as {file_name_for_upload}");
-
-                    try{
-                        await blob.UploadAsync(File.OpenRead(formatted_data));
-                        unique_name = true;
-                    }
-                    catch(RequestFailedException ex2)
-                    when (ex2.ErrorCode != BlobErrorCode.BlobAlreadyExists) {
-                        successful_upload = false;
-                        log.LogError($"Cannot upload processed version of {complete_blob_name}: {ex2}");
-                    }
-                
+                    log.LogCritical($"Blob already exists.");
                 }
-            }
-            catch (RequestFailedException ex)
-            {
-                successful_upload = false;
-                log.LogError($"Cannot upload processed version of {complete_blob_name}: {ex}");
+                catch (RequestFailedException ex)
+                {
+                    successful_upload = false;
+                    log.LogError($"Cannot upload processed version of {complete_blob_name}: {ex}");
+                    break;
+                }
             }
 
 
             // Delete compressed blob
-            /* if(successful_upload)
+            if(successful_upload)
             {
+                log.LogInformation("Upload succeeded");
                 BlobClient blob_old = container_compressed.GetBlobClient(complete_blob_name);
                 bool res = blob_old.DeleteIfExists();
                 if(!res) {
-                    log.LogInformation($"Couldn't delete compressed blob.");
+                    log.LogError($"Couldn't delete compressed blob.");
                 } else {
                     log.LogInformation($"Deleted compressed blob.");
                 }
-            } */
+            }
         
 
             // Make DB entry
