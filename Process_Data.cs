@@ -64,7 +64,7 @@ namespace Chaze.Function
 		}
 
 
-        public enum READ_STATE : byte {PRESSURE=0, BACK_PRESSURE, HEART_RATE, BNO, HEART_RATE_RAW, ERROR, EOF=102};
+        public enum READ_STATE : byte {PRESSURE=0, BACK_PRESSURE, HEART_RATE, BNO, HEART_RATE_RAW, ERROR};//, EOF=102};
 
         public static READ_STATE get_state(byte value)
         {
@@ -79,8 +79,8 @@ namespace Chaze.Function
                     return READ_STATE.HEART_RATE;
                 case 6:
                     return READ_STATE.HEART_RATE_RAW;
-                case 102:
-                    return READ_STATE.EOF;
+                /*case 102:
+                    return READ_STATE.EOF;*/
                 default:
                     return READ_STATE.ERROR;
             }
@@ -279,7 +279,7 @@ namespace Chaze.Function
                     int n = decompressedStream.Read(state_byte, 0, 1); to_parse--;
 
                     READ_STATE curr_state = get_state(state_byte[0]);
-                    if (curr_state == READ_STATE.EOF) break;
+                    //if (curr_state == READ_STATE.EOF) break;
                     if (curr_state == READ_STATE.ERROR) log.LogError($"State byte: {state_byte[0]}");
 
                     int state_datasize = get_state_datasize(curr_state);
